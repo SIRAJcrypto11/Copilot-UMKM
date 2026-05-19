@@ -29,7 +29,7 @@ async function startServer() {
       const { prompt } = req.body;
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Berdasarkan prompt berikut: "${prompt}", buatkan data setup bisnis UMKM yang realistis untuk testing. Sertakan nama bisnis, tipe usaha, 5 produk (nama, harga modal, harga jual, stok), dan 5 transaksi terakhir dalam 7 hari terakhir.`,
+        contents: `Berdasarkan prompt berikut: "${prompt}", buatkan data setup bisnis UMKM yang realistis untuk testing. Sertakan nama bisnis, tipe usaha, 5-10 produk (nama, kategori, harga modal, harga jual, stok saat ini, stok minimum), dan 15 transaksi terakhir dalam 7 hari terakhir.`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -37,15 +37,18 @@ async function startServer() {
             properties: {
               name: { type: Type.STRING },
               type: { type: Type.STRING },
+              monthlyTargetRevenue: { type: Type.NUMBER },
               products: {
                 type: Type.ARRAY,
                 items: {
                   type: Type.OBJECT,
                   properties: {
                     name: { type: Type.STRING },
+                    category: { type: Type.STRING },
                     cost: { type: Type.NUMBER },
                     price: { type: Type.NUMBER },
                     stock: { type: Type.NUMBER },
+                    minStock: { type: Type.NUMBER },
                   },
                 },
               },
@@ -58,6 +61,7 @@ async function startServer() {
                     productName: { type: Type.STRING },
                     quantity: { type: Type.NUMBER },
                     total: { type: Type.NUMBER },
+                    cost: { type: Type.NUMBER },
                   },
                 },
               },
@@ -225,6 +229,40 @@ async function startServer() {
       const message = error.message?.includes("503") || error.message?.includes("demand") 
         ? "Gemini sedang sibuk, silakan coba lagi sebentar lagi." 
         : "Gagal memuat ringkasan bisnis.";
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // 4. Simulate Business
+  app.post("/api/business/simulate", async (req, res) => {
+    try {
+      const { scenario, businessData } = req.body;
+      const context = JSON.stringify(businessData);
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Berdasarkan data bisnis ini: ${context}, pengguna ingin melakukan simulasi keputusan: "${scenario}". Analisis dampaknya secara logis (misalnya prediksi perubahan omzet, laba kotor, dan risiko). Berikan ringkasan dalam format JSON.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              impactRevenueText: { type: Type.STRING },
+              impactProfitText: { type: Type.STRING },
+              impactRiskText: { type: Type.STRING },
+              recommendationNote: { type: Type.STRING, description: "aman dicoba | perlu hati-hati | risiko tinggi" }
+            },
+            required: ["impactRevenueText", "impactProfitText", "impactRiskText", "recommendationNote"]
+          }
+        }
+      });
+
+      res.json(JSON.parse(response.text));
+    } catch (error: any) {
+      console.error("Simulation Error:", error);
+      const message = error.message?.includes("503") || error.message?.includes("demand") 
+        ? "Gemini sedang sibuk, silakan coba lagi sebentar lagi." 
+        : "Gagal memuat simulasi bisnis.";
       res.status(500).json({ error: message });
     }
   });
