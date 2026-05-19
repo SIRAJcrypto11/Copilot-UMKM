@@ -1,0 +1,6 @@
+{
+  "name": "SNIShop AI Copilot",
+  "description": "AI-powered business operating system layer for Indonesian UMKM (MSMEs).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
