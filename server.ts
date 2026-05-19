@@ -69,9 +69,77 @@ async function startServer() {
       
       const setupData = JSON.parse(response.text);
       res.json(setupData);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Setup Error:", error);
-      res.status(500).json({ error: "Gagal melakukan setup bisnis." });
+      const message = error.message?.includes("503") || error.message?.includes("demand") 
+        ? "Gemini sedang sibuk, silakan coba lagi sebentar lagi." 
+        : "Gagal melakukan setup bisnis.";
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // 1.5. Import Business via URL or Catalog Text
+  app.post("/api/business/import", async (req, res) => {
+    try {
+      const { url, catalogText } = req.body;
+      let context = catalogText || "";
+
+      if (url) {
+        try {
+          const webContent = await fetch(url).then(r => r.text());
+          context += "\nContent from URL:\n" + webContent.substring(0, 5000); 
+        } catch (e) {
+          context += `\n(User provided URL: ${url}. Extract business data based on this URL if you know it, or use common patterns for such sites.)`;
+        }
+      }
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Ekstrak data bisnis dari konteks berikut: "${context}". Hasilkan data bisnis yang terstruktur (nama, tipe, produk, transaksi simulasi). Jika data produk tidak lengkap, buatkan simulasi yang masuk akal berdasarkan tipe bisnisnya.`,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              type: { type: Type.STRING },
+              products: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    name: { type: Type.STRING },
+                    cost: { type: Type.NUMBER },
+                    price: { type: Type.NUMBER },
+                    stock: { type: Type.NUMBER },
+                  },
+                },
+              },
+              transactions: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    date: { type: Type.STRING },
+                    productName: { type: Type.STRING },
+                    quantity: { type: Type.NUMBER },
+                    total: { type: Type.NUMBER },
+                  },
+                },
+              },
+            },
+            required: ["name", "type", "products", "transactions"],
+          },
+        },
+      });
+
+      res.json(JSON.parse(response.text));
+    } catch (error: any) {
+      console.error("Import Error:", error);
+      const message = error.message?.includes("503") || error.message?.includes("demand") 
+        ? "Gemini sedang sibuk, silakan coba lagi sebentar lagi." 
+        : "Gagal mengimpor data bisnis.";
+      res.status(500).json({ error: message });
     }
   });
 
@@ -81,7 +149,7 @@ async function startServer() {
       const { message, history, businessData } = req.body;
       const context = JSON.stringify(businessData);
       
-      const chat = ai.chats.create({
+      const chat = ai.chats.create({ 
         model: "gemini-3-flash-preview",
         config: {
           systemInstruction: `Anda adalah SNIShop AI Copilot, asisten pintar untuk pemilik UMKM di Indonesia. 
@@ -98,9 +166,12 @@ async function startServer() {
 
       const response = await chat.sendMessage({ message });
       res.json({ content: response.text });
-    } catch (error) {
+    } catch (error: any) {
       console.error("Chat Error:", error);
-      res.status(500).json({ error: "Gagal memproses pesan." });
+      const message = error.message?.includes("503") || error.message?.includes("demand") 
+        ? "Gemini sedang sibuk, silakan coba lagi sebentar lagi." 
+        : "Gagal memproses pesan.";
+      res.status(500).json({ error: message });
     }
   });
 
@@ -112,13 +183,7 @@ async function startServer() {
       
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: `Berdasarkan data bisnis ini: ${context}, buatkan ringkasan operasional harian yang menarik untuk pemilik usaha. 
-        Tentukan:
-        1. Ringkasan performa penjualan (Omzet & Estimasi Laba).
-        2. Produk Terlaris.
-        3. Peringatan Stok (jika ada yang rendah).
-        4. Tiga tindakan prioritas (Action Center) yang harus dilakukan hari ini (misal: restock, promo, follow up).
-        Tampilkan dalam format JSON.`,
+        contents: `Berdasarkan data bisnis ini: ${context}, buatkan ringkasan operasional harian yang menarik untuk pemilik usaha. Tentukan: 1. Ringkasan performa penjualan (Omzet & Estimasi Laba). 2. Produk Terlaris. 3. Peringatan Stok (jika ada yang rendah). 4. Tiga tindakan prioritas (Action Center) yang harus dilakukan hari ini (misal: restock, promo, follow up). Tampilkan dalam format JSON.`,
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -155,9 +220,12 @@ async function startServer() {
       });
 
       res.json(JSON.parse(response.text));
-    } catch (error) {
+    } catch (error: any) {
       console.error("Brief Error:", error);
-      res.status(500).json({ error: "Gagal memuat ringkasan bisnis." });
+      const message = error.message?.includes("503") || error.message?.includes("demand") 
+        ? "Gemini sedang sibuk, silakan coba lagi sebentar lagi." 
+        : "Gagal memuat ringkasan bisnis.";
+      res.status(500).json({ error: message });
     }
   });
 

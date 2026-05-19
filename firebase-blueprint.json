@@ -1,0 +1,32 @@
+{
+  "entities": {
+    "Business": {
+      "title": "Business",
+      "description": "Structured data for a UMKM business",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Name of the business" },
+        "type": { "type": "string", "description": "Type of business (retail, laundry, etc)" },
+        "userId": { "type": "string", "description": "Firebase UID of the owner" },
+        "products": {
+          "type": "array",
+          "description": "List of products managed by the business"
+        },
+        "transactions": {
+          "type": "array",
+          "description": "Recent transactions for analysis"
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" },
+        "sourceUrl": { "type": "string", "description": "Optional source website or marketplace link" }
+      },
+      "required": ["name", "type", "userId", "products", "transactions"]
+    }
+  },
+  "firestore": {
+    "/businesses/{businessId}": {
+      "schema": "Business",
+      "description": "Primary business configuration and data"
+    }
+  }
+}

@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Business Validation
+    function isValidBusiness(data) {
+      return data.name is string && data.name.size() <= 100
+        && data.type is string && data.type.size() <= 50
+        && data.userId is string && data.userId == request.auth.uid
+        && data.products is list && data.products.size() <= 100
+        && data.transactions is list && data.transactions.size() <= 200
+        && (data.get('sourceUrl', '') is string && data.get('sourceUrl', '').size() <= 500);
+    }
+
+    // Businesses collection
+    match /businesses/{businessId} {
+      allow get: if isSignedIn() && request.auth.uid == businessId;
+      allow list: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid);
+      
+      allow create: if isSignedIn() 
+        && businessId == request.auth.uid
+        && isValidBusiness(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+
+      allow update: if isSignedIn()
+        && businessId == request.auth.uid
+        && isValidBusiness(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == (resource != null ? existing().createdAt : request.time)
+        && incoming().updatedAt == request.time;
+
+      allow delete: if isSignedIn() && request.auth.uid == businessId;
+    }
+  }
+}

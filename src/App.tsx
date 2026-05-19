@@ -23,9 +23,22 @@ import {
   CheckCircle2,
   ChevronRight,
   TrendingDown,
-  Store
+  Store,
+  Globe,
+  LogIn,
+  LogOut,
+  User,
+  ShoppingBag,
+  History,
+  Settings,
+  MoreVertical,
+  PlusCircle,
+  FileSearch
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { auth, db, loginWithGoogle, logout, handleFirestoreError, OperationType } from './lib/firebase';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs, onSnapshot, serverTimestamp } from 'firebase/firestore';
 
 interface Product {
   name: string;
@@ -69,18 +82,70 @@ interface Message {
 }
 
 export default function App() {
+  const [user, setUser] = useState<FirebaseUser | null>(null);
   const [businessData, setBusinessData] = useState<BusinessData | null>(null);
   const [briefData, setBriefData] = useState<BriefData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [setupPrompt, setSetupPrompt] = useState("");
-  const [activeTab, setActiveTab] = useState<'brief' | 'chat' | 'inventory'>('brief');
+  const [importUrl, setImportUrl] = useState("");
+  const [activeTab, setActiveTab] = useState<'brief' | 'chat' | 'inventory' | 'settings'>('brief');
   const [chatMessages, setChatMessages] = useState<Message[]>([]);
   const [currentMessage, setCurrentMessage] = useState("");
+  const [setupMode, setSetupMode] = useState<'prompt' | 'url' | 'manual'>('prompt');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Auth Listener
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (u) {
+        fetchBusiness(u.uid);
+      } else {
+        setBusinessData(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const fetchBusiness = async (uid: string) => {
+    setIsLoading(true);
+    const path = `businesses/${uid}`;
+    try {
+      const docRef = doc(db, 'businesses', uid);
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data() as BusinessData;
+        setBusinessData(data);
+        await fetchBrief(data);
+      }
+    } catch (error) {
+      console.error(error);
+      // handleFirestoreError(error, OperationType.GET, path);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const saveBusiness = async (data: BusinessData) => {
+    if (!user) return;
+    setIsLoading(true);
+    try {
+      const docRef = doc(db, 'businesses', user.uid);
+      const payload = {
+        ...data,
+        userId: user.uid,
+        updatedAt: serverTimestamp(),
+        createdAt: businessData?.createdAt || serverTimestamp()
+      };
+      await setDoc(docRef, payload);
+      setBusinessData(data);
+      await fetchBrief(data);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleSetup = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -94,13 +159,39 @@ export default function App() {
         body: JSON.stringify({ prompt: setupPrompt }),
       });
       const data = await response.json();
-      setBusinessData(data);
-      await fetchBrief(data);
+      await saveBusiness(data);
     } catch (error) {
       console.error(error);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleImport = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!importUrl) return;
+
+    setIsLoading(true);
+    try {
+      const response = await fetch('/api/business/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: importUrl }),
+      });
+      const data = await response.json();
+      await saveBusiness(data);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleAddProduct = () => {
+    if (!businessData) return;
+    const newProduct: Product = { name: "Produk Baru", cost: 0, price: 0, stock: 0 };
+    const newData = { ...businessData, products: [...businessData.products, newProduct] };
+    saveBusiness(newData);
   };
 
   const fetchBrief = async (data: BusinessData) => {
@@ -148,105 +239,137 @@ export default function App() {
     }
   };
 
+  if (!user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-[#F1F5F9]">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="max-w-md w-full bg-white p-12 rounded-[3rem] shadow-2xl shadow-slate-200 border border-slate-100 text-center space-y-8"
+        >
+          <div className="inline-flex items-center justify-center p-5 bg-blue-600 rounded-[2rem] shadow-xl shadow-blue-200">
+            <Bot className="w-12 h-12 text-white" />
+          </div>
+          <div className="space-y-2">
+            <h1 className="text-4xl font-bold tracking-tight text-slate-900">SNIShop AI</h1>
+            <p className="text-slate-500 font-medium">Masuk untuk mengelola dashboard UMKM Anda</p>
+          </div>
+          <button 
+            onClick={loginWithGoogle}
+            className="w-full flex items-center justify-center space-x-3 bg-white border-2 border-slate-100 py-4 rounded-2xl font-bold text-slate-700 hover:bg-slate-50 hover:border-slate-200 transition-all active:scale-95 shadow-sm"
+          >
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6" alt="Google" />
+            <span>Masuk dengan Google</span>
+          </button>
+          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Aman & Terenkripsi oleh Google Cloud</p>
+        </motion.div>
+      </div>
+    );
+  }
+
   if (!businessData) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6 sm:p-12 bg-[#F1F5F9]" id="onboarding-page">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-3xl w-full text-center space-y-12"
-        >
-          <div className="space-y-6">
-            <motion.div 
-              initial={{ scale: 0.8 }}
-              animate={{ scale: 1 }}
-              className="inline-flex items-center justify-center p-5 bg-blue-600 rounded-[2rem] shadow-xl shadow-blue-200"
-            >
-              <Bot className="w-12 h-12 text-white" />
-            </motion.div>
-            <div className="space-y-3">
-              <h1 className="text-5xl sm:text-6xl font-bold tracking-tight text-slate-900" id="main-title">
-                SNIShop <span className="text-blue-600">AI Copilot</span>
+      <div className="min-h-screen flex flex-col bg-[#F1F5F9]" id="onboarding-page">
+        <header className="px-8 py-6 flex justify-between items-center">
+           <div className="flex items-center space-x-3">
+            <Bot className="w-8 h-8 text-blue-600" />
+            <span className="font-bold text-lg">SNIShop AI</span>
+          </div>
+          <button onClick={logout} className="flex items-center space-x-2 text-slate-400 hover:text-red-600 font-bold text-xs uppercase tracking-widest transition-colors">
+            <span>Keluar</span>
+            <LogOut className="w-4 h-4" />
+          </button>
+        </header>
+
+        <main className="flex-1 flex items-center justify-center p-6">
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="max-w-3xl w-full text-center space-y-12"
+          >
+            <div className="space-y-4">
+              <h1 className="text-5xl sm:text-6xl font-bold tracking-tight text-slate-900">
+                Halo, <span className="text-blue-600">{user.displayName?.split(' ')[0]}!</span>
               </h1>
               <p className="text-xl text-slate-500 font-medium max-w-lg mx-auto">
-                Transformasi bisnis UMKM Anda menjadi ekosistem digital cerdas dengan Gemini AI.
+                Bagaimana Anda ingin memuat data bisnis Anda hari ini?
               </p>
             </div>
-          </div>
 
-          <form 
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSetup();
-            }} 
-            className="bg-white p-3 rounded-[2.5rem] shadow-2xl shadow-slate-200 border border-slate-100 flex items-center group transition-all focus-within:ring-4 focus-within:ring-blue-100"
-          >
-            <div className="pl-6 text-blue-600">
-              <Store className="w-6 h-6" />
-            </div>
-            <input 
-              type="text"
-              id="setup-input"
-              className="flex-1 bg-transparent border-none focus:ring-0 px-4 py-5 text-xl font-medium outline-none placeholder:text-slate-300"
-              placeholder="Ceritakan bisnis Anda dalam satu kalimat..."
-              value={setupPrompt}
-              onChange={(e) => setSetupPrompt(e.target.value)}
-              disabled={isLoading}
-            />
-            <button 
-              type="submit"
-              id="setup-button"
-              disabled={isLoading || !setupPrompt}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-5 rounded-[1.8rem] font-bold flex items-center transition-all disabled:opacity-50 shadow-lg shadow-blue-200 active:scale-95"
-            >
-              {isLoading ? <RefreshCcw className="w-6 h-6 animate-spin" /> : <>Mulai Setup <ArrowRight className="ml-2 w-6 h-6" /></>}
-            </button>
-          </form>
-
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-            {[
-              { icon: LayoutDashboard, title: "Bento Insight", color: "blue" },
-              { icon: MessageSquare, title: "Chat Copilot", color: "purple" },
-              { icon: TrendingUp, title: "Smart Profit", color: "green" },
-              { icon: CheckCircle2, title: "Auto Setup", color: "orange" }
-            ].map((item, idx) => (
-              <motion.div 
-                key={idx}
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.4 + idx * 0.1 }}
-                className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm"
-              >
-                <div className={`w-10 h-10 rounded-xl bg-${item.color}-50 flex items-center justify-center mb-3 mx-auto`}>
-                  <item.icon className={`w-5 h-5 text-${item.color}-600`} />
-                </div>
-                <h3 className="font-bold text-slate-800 text-sm tracking-tight">{item.title}</h3>
-              </motion.div>
-            ))}
-          </div>
-
-          <div className="flex flex-col items-center space-y-4">
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Atau gunakan data simulasi</p>
-            <div className="flex flex-wrap justify-center gap-3">
-              {[
-                "Toko Sembako Jaya",
-                "Laundry Wangi Express",
-                "Hijabify Fashion",
-                "Warung Kopi Digital"
-              ].map((demo, idx) => (
-                <button 
-                  key={idx}
-                  onClick={() => {
-                    setSetupPrompt(`Saya punya usaha ${demo} yang sedang berkembang.`);
-                  }}
-                  className="px-4 py-2 rounded-full border border-slate-200 bg-white text-sm font-bold text-slate-600 hover:border-blue-500 hover:text-blue-600 transition-all shadow-sm"
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {(['prompt', 'url', 'manual'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setSetupMode(mode)}
+                  className={`p-6 rounded-[2.5rem] border-2 transition-all text-left space-y-4 ${
+                    setupMode === mode ? 'bg-white border-blue-600 shadow-xl shadow-blue-100 ring-4 ring-blue-50' : 'bg-white/50 border-slate-100 hover:border-slate-200'
+                  }`}
                 >
-                  {demo}
+                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${
+                    mode === 'prompt' ? 'bg-blue-100 text-blue-600' : mode === 'url' ? 'bg-purple-100 text-purple-600' : 'bg-orange-100 text-orange-600'
+                  }`}>
+                    {mode === 'prompt' ? <Bot className="w-6 h-6" /> : mode === 'url' ? <Globe className="w-6 h-6" /> : <PlusCircle className="w-6 h-6" />}
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900">{mode === 'prompt' ? 'AI Prompt' : mode === 'url' ? 'Import URL' : 'Setup Manual'}</h3>
+                    <p className="text-xs text-slate-500 font-medium">{mode === 'prompt' ? 'Ceritakan bisnis Anda' : mode === 'url' ? 'Dari web/katalog' : 'Isi form manual'}</p>
+                  </div>
                 </button>
               ))}
             </div>
-          </div>
-        </motion.div>
+
+            <div className="bg-white p-4 rounded-[2.5rem] shadow-2xl shadow-slate-200 border border-slate-100 min-h-[140px] flex items-center">
+              {setupMode === 'prompt' && (
+                <form onSubmit={handleSetup} className="flex-1 flex items-center px-2">
+                  <Bot className="w-6 h-6 text-blue-600 mr-4" />
+                  <input 
+                    className="flex-1 bg-transparent border-none focus:ring-0 text-xl font-medium outline-none placeholder:text-slate-300"
+                    placeholder="Contoh: Saya punya toko sembako di Jakarta yang ramai..."
+                    value={setupPrompt}
+                    onChange={(e) => setSetupPrompt(e.target.value)}
+                    disabled={isLoading}
+                  />
+                  <button type="submit" disabled={isLoading || !setupPrompt} className="bg-blue-600 text-white px-8 py-4 rounded-[1.5rem] font-bold shadow-lg shadow-blue-200 flex items-center">
+                    {isLoading ? <RefreshCcw className="animate-spin" /> : 'Gas!'}
+                  </button>
+                </form>
+              )}
+              {setupMode === 'url' && (
+                <form onSubmit={handleImport} className="flex-1 flex items-center px-2">
+                  <Globe className="w-6 h-6 text-purple-600 mr-4" />
+                  <input 
+                    className="flex-1 bg-transparent border-none focus:ring-0 text-xl font-medium outline-none placeholder:text-slate-300"
+                    placeholder="Masukkan URL website atau link marketplace..."
+                    value={importUrl}
+                    onChange={(e) => setImportUrl(e.target.value)}
+                    disabled={isLoading}
+                  />
+                  <button type="submit" disabled={isLoading || !importUrl} className="bg-purple-600 text-white px-8 py-4 rounded-[1.5rem] font-bold shadow-lg shadow-purple-200">
+                    {isLoading ? <RefreshCcw className="animate-spin" /> : 'Import'}
+                  </button>
+                </form>
+              )}
+              {setupMode === 'manual' && (
+                <div className="flex-1 flex items-center justify-between px-6">
+                   <div className="flex items-center space-x-4">
+                    <PlusCircle className="w-6 h-6 text-orange-600" />
+                    <span className="text-xl font-bold text-slate-800 tracking-tight">Mulai dari nol</span>
+                  </div>
+                  <button 
+                    onClick={() => saveBusiness({ name: "Bisnis Saya", type: "Retail", products: [], transactions: [] })}
+                    className="bg-orange-600 text-white px-8 py-4 rounded-[1.5rem] font-bold shadow-lg shadow-orange-200"
+                  >
+                    Buka Dashboard
+                  </button>
+                </div>
+              )}
+            </div>
+            
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+              Data Anda aman dan hanya bisa diakses oleh akun Google Anda.
+            </p>
+          </motion.div>
+        </main>
       </div>
     );
   }
@@ -291,11 +414,13 @@ export default function App() {
 
         <div className="flex items-center gap-4">
           <div className="flex flex-col items-end hidden sm:flex">
-             <span className="text-xs font-bold text-slate-800">Status Toko</span>
-             <span className="text-[10px] font-bold text-green-600 uppercase">Sehat & Optimal</span>
+             <span className="text-xs font-bold text-slate-800">{user.displayName}</span>
+             <button onClick={logout} className="text-[10px] font-bold text-red-500 hover:text-red-700 uppercase tracking-widest transition-colors flex items-center">
+                Logout <LogOut className="w-2 h-2 ml-1" />
+             </button>
           </div>
           <div className="w-10 h-10 rounded-full bg-slate-200 border-2 border-white shadow-sm overflow-hidden">
-             <img src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${businessData.name}`} alt="User Avatar" />
+             <img src={user.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.uid}`} alt="User Avatar" />
           </div>
         </div>
       </header>
@@ -336,14 +461,14 @@ export default function App() {
                   <div className="mt-auto grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="bg-slate-50 rounded-3xl p-6 border border-slate-100">
                       <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-2">Laba Estimasi</p>
-                      <p className="text-3xl font-bold text-slate-900 leading-none">Rp {(briefData?.metrics.profit || 0).toLocaleString()}</p>
+                      <p className="text-3xl font-bold text-slate-900 leading-none">Rp {(briefData?.metrics?.profit || 0).toLocaleString()}</p>
                       <div className="flex items-center text-green-600 text-xs font-bold mt-2">
                         <TrendingUp className="w-3 h-3 mr-1" /> +12.5% vs Kemarin
                       </div>
                     </div>
                     <div className="bg-slate-50 rounded-3xl p-6 border border-slate-100">
                       <p className="text-[10px] text-slate-400 uppercase font-bold tracking-widest mb-2">Produk Terlaris</p>
-                      <p className="text-xl font-bold text-slate-900 truncate leading-none mt-1">{briefData?.metrics.topProduct || '-'}</p>
+                      <p className="text-xl font-bold text-slate-900 truncate leading-none mt-1">{briefData?.metrics?.topProduct || '-'}</p>
                       <p className="text-xs text-slate-400 font-bold mt-2 uppercase tracking-tight">Demand Tinggi</p>
                     </div>
                   </div>
@@ -356,7 +481,7 @@ export default function App() {
                 <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-[2.5rem] p-8 text-white shadow-xl shadow-blue-200 flex flex-col justify-between h-[280px]">
                   <p className="text-sm font-bold opacity-80 uppercase tracking-widest">Omzet Penjualan</p>
                   <div>
-                    <p className="text-4xl font-bold tracking-tight">Rp {(briefData?.metrics.revenue || 0).toLocaleString()}</p>
+                    <p className="text-4xl font-bold tracking-tight">Rp {(briefData?.metrics?.revenue || 0).toLocaleString()}</p>
                     <p className="text-xs mt-2 font-medium opacity-90">Performa stabil di sektor {businessData.type}</p>
                   </div>
                   <div className="h-16 w-full bg-white/10 rounded-2xl flex items-end p-2 gap-1.5">
@@ -509,6 +634,13 @@ export default function App() {
                 <h3 className="text-3xl font-bold text-slate-900 tracking-tight">
                   Manajemen <span className="text-blue-600">Stok & Produk</span>
                 </h3>
+                <button 
+                  onClick={handleAddProduct}
+                  className="bg-blue-600 text-white px-6 py-3 rounded-2xl font-bold text-sm shadow-lg shadow-blue-100 flex items-center space-x-2 active:scale-95 transition-all"
+                >
+                  <PlusCircle className="w-5 h-5" />
+                  <span>Tambah Produk</span>
+                </button>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -524,25 +656,74 @@ export default function App() {
                         {product.stock < 10 ? 'Stok Rendah' : 'Stok Aman'}: {product.stock}
                       </div>
                     </div>
-                    <h4 className="text-xl font-bold text-slate-900 mb-2">{product.name}</h4>
-                    <div className="space-y-2 mb-6">
-                      <div className="flex justify-between text-sm font-medium">
-                        <span className="text-slate-400">Harga Modal</span>
-                        <span className="text-slate-900 font-bold">Rp {product.cost.toLocaleString()}</span>
+                    <input 
+                      className="text-xl font-bold text-slate-900 mb-2 bg-transparent border-none focus:ring-0 w-full p-0"
+                      value={product.name}
+                      onChange={(e) => {
+                         const newProducts = [...businessData.products];
+                         newProducts[idx] = { ...product, name: e.target.value };
+                         setBusinessData({ ...businessData, products: newProducts });
+                      }}
+                       onBlur={() => saveBusiness(businessData)}
+                    />
+                    <div className="space-y-4 mb-6">
+                      <div className="flex items-center justify-between text-sm font-medium">
+                        <span className="text-slate-400">Modal</span>
+                        <input 
+                          type="number"
+                          className="bg-slate-50 border-none rounded-lg px-2 py-1 w-24 text-right font-bold focus:ring-1 focus:ring-blue-200"
+                          value={product.cost}
+                          onChange={(e) => {
+                             const newProducts = [...businessData.products];
+                             newProducts[idx] = { ...product, cost: Number(e.target.value) };
+                             setBusinessData({ ...businessData, products: newProducts });
+                          }}
+                          onBlur={() => saveBusiness(businessData)}
+                        />
                       </div>
-                      <div className="flex justify-between text-sm font-medium">
-                        <span className="text-slate-400">Harga Jual</span>
-                        <span className="text-blue-600 font-bold">Rp {product.price.toLocaleString()}</span>
+                      <div className="flex items-center justify-between text-sm font-medium">
+                        <span className="text-slate-400">Jual</span>
+                        <input 
+                          type="number"
+                          className="bg-blue-50 border-none rounded-lg px-2 py-1 w-24 text-right font-bold text-blue-600 focus:ring-1 focus:ring-blue-200"
+                          value={product.price}
+                          onChange={(e) => {
+                             const newProducts = [...businessData.products];
+                             newProducts[idx] = { ...product, price: Number(e.target.value) };
+                             setBusinessData({ ...businessData, products: newProducts });
+                          }}
+                          onBlur={() => saveBusiness(businessData)}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between text-sm font-medium">
+                        <span className="text-slate-400">Stok</span>
+                        <input 
+                          type="number"
+                          className="bg-slate-50 border-none rounded-lg px-2 py-1 w-24 text-right font-bold focus:ring-1 focus:ring-blue-200"
+                          value={product.stock}
+                          onChange={(e) => {
+                             const newProducts = [...businessData.products];
+                             newProducts[idx] = { ...product, stock: Number(e.target.value) };
+                             setBusinessData({ ...businessData, products: newProducts });
+                          }}
+                          onBlur={() => saveBusiness(businessData)}
+                        />
                       </div>
                     </div>
                     <div className="pt-6 border-t border-slate-100 flex items-center justify-between">
-                      <div className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Laba Bersih / Unit</div>
+                      <div className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Laba Bersih</div>
                       <div className="text-lg font-bold text-green-600">
                         Rp {(product.price - product.cost).toLocaleString()}
                       </div>
                     </div>
                   </div>
                 ))}
+                {businessData.products.length === 0 && (
+                  <div className="col-span-full py-20 bg-white border border-dashed border-slate-300 rounded-[2.5rem] flex flex-col items-center justify-center space-y-4 opacity-50">
+                    <ShoppingBag className="w-12 h-12 text-slate-300" />
+                    <p className="font-bold text-slate-500">Belum ada produk</p>
+                  </div>
+                )}
               </div>
 
               <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
